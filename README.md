@@ -48,25 +48,42 @@ Turns the canvas `boxes` JSON into a final prompt for MiniMax-H3-Image.
 | **Inputs** | `boxes` (from the canvas), `extra_brief` (scene/style text), optional `clip` (a CLIP model with text-generation support, e.g. Qwen loaded via *Load CLIP*), `max_length` |
 | **Outputs** | `prompt` (STRING) |
 
-**Deterministic by default — no LLM required:**
+**Deterministic by default — no LLM required.** The prompt follows MiniMax's
+official H3-Image prompt-writing grammar, as one continuous prose paragraph:
 
-- One placement line per box, coordinates `[x1, y1, x2, y2]` normalized to a
-  0–1000 grid.
-- Box descriptions become subjects verbatim; `<Picture N>` references pass
-  through untouched.
-- Empty description → the region auto-binds to `the exact subject shown in
-  <Picture i+1>` plus an identity clause (sex, face, hair and clothing stay
-  identical to the reference — never a generic "the person").
-- Short boxes get position-only wording; full-height boxes get
-  head-to-feet scale-to-fill wording.
+1. **Source definitions** — `The interior room in <Picture 1> is <Subject 1>.`,
+   `The person in <Picture 2> is <Subject 2>.`, … in picture order.
+2. **Target overview** — `The target image is one single continuous photograph
+   of that room …`
+3. **Per-subject relationships** — one placement sentence plus one
+   `<Subject N> is partially preserved; …` identity sentence per box.
+4. **Shared-light closing** — one perspective, one light, contact shadows on
+   the same floor.
+
+Design choices that keep H3 from misreading the layout:
+
+- **Single-scene enforcement.** The overview declares one unbroken frame: one
+  camera viewpoint, one continuous floor and wall behind every figure, one
+  lighting setup. This prevents the split-panel / collage renders that
+  per-region phrasing provokes.
+- **Relational positions, never coordinates.** Boxes become scene language —
+  left third / center / right third of the frame, "to the right of
+  `<Subject 2>`", full-body vs. mid-wall scale cues. Raw `[x, y, x, y]`
+  coordinate or "framed by … grid" clauses are never emitted: H3 reads them as
+  separate frames per subject.
+- Box descriptions are woven in verbatim; an empty description auto-binds the
+  region's identity to its reference picture through the partial-preservation
+  sentence (face, hair, skin tone and outfit stay exactly as in
+  `<Picture N>` — never a generic "the person").
 - The output contains **zero** guide vocabulary — words like box, rectangle,
   outline or color names describing placement regions are never emitted.
 
 **Optional LLM mode:** wire a `clip` with generation support and the template is
-rephrased into natural prose by the model. The output is guarded: if it mentions
-banned guide words (rectangle, box, outline, guide, map, marker, diagram,
-framework) or generation fails for any reason, the node silently falls back to
-the deterministic template.
+rephrased into natural prose by the model, under a system prompt that enforces
+the same grammar. The output is guarded: if it mentions banned guide words
+(rectangle, box, outline, guide, map, marker, diagram, framework, collage,
+panel, diptych, split-screen) or generation fails for any reason, the node
+silently falls back to the deterministic template.
 
 ## Example wiring (multi-reference composition)
 

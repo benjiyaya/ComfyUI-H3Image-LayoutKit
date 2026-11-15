@@ -68,12 +68,16 @@ class H3BBoxCanvas:
 
 
 class H3LayoutPrompt:
-    """Deterministic H3-Image layout prompt.
+    """Deterministic H3-Image layout prompt in the official subject grammar
+    (definitions -> 'The target image' overview -> per-subject placement and
+    partial-preservation sentences -> shared-light closing). Positions are
+    relational scene language; no coordinates, so H3 never reads regions as
+    separate panels.
 
     Widgets, stable order: boxes, extra_brief, [clip], [max_length].
     Unwired clip = pure template. Wired clip (e.g. Qwen3.5-9B) = LLM
-    rephrasing, guarded: any output mentioning boxes/rectangles/guides or
-    failing to generate falls back to the deterministic template."""
+    rephrasing, guarded: any output mentioning boxes/rectangles/collage/
+    panels or failing to generate falls back to the deterministic template."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -105,10 +109,10 @@ class H3LayoutPrompt:
     RETURN_NAMES = ("prompt",)
     FUNCTION = "main"
     CATEGORY = "H3-Layout"
-    DESCRIPTION = ("Deterministic layout prompt; wire a CLIP in and the LLM "
-                   "rephrases it, with template fallback on contamination. "
-                   "Keep the canvas preview OUT of image_1 — use the clean "
-                   "room image there.")
+    DESCRIPTION = ("Deterministic single-scene layout prompt in H3's subject "
+                   "grammar; wire a CLIP in and the LLM rephrases it, with "
+                   "template fallback on contamination. Keep the canvas "
+                   "preview OUT of image_1 — use the clean room image there.")
 
     def main(self, boxes, extra_brief="", clip=None, max_length=1024):
         # old workflows saved a 'mode' COMBO value where fields shifted
@@ -121,8 +125,7 @@ class H3LayoutPrompt:
             logging.warning("H3LayoutPrompt: no valid boxes parsed from input — "
                             "prompt will contain no placement regions. Check the "
                             "canvas 'boxes' wire / editor state.")
-        template = core.build_template_prompt(parsed, "", extra_brief,
-                                               map_image=False)
+        template = core.build_template_prompt(parsed, "", extra_brief)
         if clip is None:
             return (template,)
 
@@ -149,7 +152,8 @@ class H3LayoutPrompt:
             return (template,)
         banned = re.search(
             r"\b(rectangles?|boxes?|outlines?|guides?|maps?|markers?|"
-            r"diagrams?|frameworks?)\b", text, re.I)
+            r"diagrams?|frameworks?|collages?|panels?|diptychs?|triptychs?|"
+            r"split-screens?)\b", text, re.I)
         if banned:
             import logging
             logging.warning("H3LayoutPrompt: LLM output mentioned %r — "

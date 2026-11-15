@@ -5,14 +5,6 @@ be unit-tested standalone.
 
 import json
 
-NAMED_COLORS = {
-    "red": (229, 57, 53), "green": (67, 160, 71), "blue": (30, 136, 229),
-    "orange": (251, 140, 0), "purple": (142, 36, 170), "cyan": (0, 188, 212),
-    "yellow": (253, 216, 53), "pink": (236, 64, 122), "white": (245, 245, 245),
-    "black": (20, 20, 20),
-}
-
-
 def parse_state(raw):
     """Accept list / JSON str / None -> list of normalized box dicts."""
     if raw is None:
@@ -70,15 +62,6 @@ def hex_to_rgb(value):
         return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))
     except ValueError:
         return (229, 57, 53)
-
-
-def color_name(rgb):
-    best, dist = "red", None
-    for name, ref in NAMED_COLORS.items():
-        d = sum((a - c) ** 2 for a, c in zip(rgb, ref))
-        if dist is None or d < dist:
-            best, dist = name, d
-    return best
 
 
 def render_preview(boxes, width, height, background_rgb=None):
@@ -141,142 +124,154 @@ def ImageFont_for(size):
 
 
 # ---------------------------------------------------------------- prompts ---
+# Prompt grammar follows MiniMax's official H3-Image prompt-writing guide:
+# source definitions -> "The target image" overview -> per-subject
+# relationships -> shared-light closing, as one continuous prose paragraph.
+# Positions are expressed in relational scene language only; raw coordinates
+# are never emitted (H3 reads per-region framing clauses as separate panels).
 
 SYSTEM_PROMPT = (
     "You are a prompt writer for MiniMax-H3-Image, a 6-step distilled "
     "image-editing model conditioned on reference pictures labeled "
     "<Picture 1>, <Picture 2>, ... and a text prompt. The user gives you a "
-    "layout job: reference images, and region placements given as "
-    "coordinates. Write ONE final prompt paragraph set for H3-Image.\n"
-    "Rules:\n"
-    "1. Describe ONLY the final photograph. The output must never contain "
-    "the words rectangle, box, outline, guide, map, marker, diagram, "
-    "framework, or any color name used to describe a placement region. "
-    "Placement colors exist only in the user's notes to you; they are not "
-    "part of the image and must not be named.\n"
-    "2. Express every position in plain scene language derived from the "
-    "coordinates (e.g. 'in the left third of the frame, standing full body "
-    "from floor to near the ceiling line'), plus optionally one 'framed by "
-    "x1, y1, x2, y2 on a 0-1000 grid' clause per subject. Coordinates are "
-    "invisible framing data, never depicted objects.\n"
-    "3. Open by declaring the image a RAW, clean photograph with no "
-    "graphics, overlays, text, labels, or colored lines.\n"
-    "4. For each subject: head-to-feet scale cue (fills the vertical extent "
-    "of its area), body horizontally centered, physically consistent "
-    "contact shadow.\n"
-    "5. Preserve each subject's exact sex, face, hair, skin tone, outfit "
-    "and proportions as shown in its reference picture; name those "
-    "attributes from the reference, never substitute generic words like "
-    "'person'; require one shared lighting setup consistent with the room.\n"
-    "6. Never write negative instructions like 'must NOT show the box'; "
-    "state positively that only people, room and light exist in the frame.\n"
-    "7. Output only the final prompt text, no preamble, no markdown."
+    "layout job: subject definitions with relational placement hints. Write "
+    "ONE continuous plain-text prompt in this exact grammar:\n"
+    "1. Source definitions first, one sentence per reference in picture "
+    "order: 'The ... in <Picture N> is <Subject N>.'\n"
+    "2. A target overview beginning with 'The target image': declare ONE "
+    "single continuous photograph of the environment of <Subject 1> in "
+    "which every subject appears together in the same unbroken frame, "
+    "sharing one camera viewpoint, one continuous floor and wall behind "
+    "every figure, and one lighting setup.\n"
+    "3. Relationships: state that <Subject 1> is partially preserved - its "
+    "walls, floor, window, furniture and light remain exactly as shown "
+    "while the people are present in the room. Then, for each person, one "
+    "placement sentence in relational scene language (left third / center / "
+    "right third of the frame, to the left or right of another <Subject>, "
+    "full body from the floor to near the ceiling line), weaving the user's "
+    "subject description verbatim, followed by '<Subject N> is partially "
+    "preserved; their face, hair, skin tone and outfit remain exactly as in "
+    "<Picture N> while pose, position and scale adapt to the room.'\n"
+    "4. A closing sentence: all figures share the room's single light and "
+    "one consistent perspective, with contact shadows on the same "
+    "continuous floor; the frame contains only the people, the room and "
+    "the light.\n"
+    "Hard rules:\n"
+    "- Never describe the result as separate photos, a collage, a grid, "
+    "panels, a split screen or a diptych, and never give each subject its "
+    "own frame, window or background. One room, one exposure.\n"
+    "- Express every position in relational scene language only. Never "
+    "print coordinates, grids, boxes, rectangles, outlines, guides, maps, "
+    "markers, diagrams or frameworks, and never name placement colors.\n"
+    "- Keep <Picture N> and <Subject N> tokens exactly as given.\n"
+    "- Preserve each subject's exact sex, face, hair, skin tone and outfit "
+    "from its reference; never substitute generic words like 'person'.\n"
+    "- Never write negative instructions about guides or overlays; state "
+    "positively what exists in the frame.\n"
+    "- Output only the final prompt text, no preamble, no markdown."
 )
 
-SKELETON_HEAD = (
-    "RAW candid photograph, untouched camera look, no graphics, no overlays, "
-    "no text, no labels, no colored lines. The finished frame is simply the "
-    "described scene with its people, exactly as if shot in one take.\n\n"
-)
 
-MAP_LINE = (
-    "<Picture 1> is an invisible placement map for this photograph - transfer "
-    "only the positions, sizes and left-right order of its marked regions "
-    "into real-world space, and render nothing of the map itself. Coordinates "
-    "are x1, y1, x2, y2 on a 0-1000 normalized grid, origin top-left.\n\n"
-)
+def _band_phrase(x1, x2):
+    """Horizontal placement in relational scene language (coords 0-1000)."""
+    cx = (x1 + x2) / 2000.0
+    if cx < 0.18:
+        return "at the far left edge of the frame"
+    if cx < 0.38:
+        return "in the left third of the frame"
+    if cx < 0.62:
+        return "in the center of the frame"
+    if cx < 0.82:
+        return "in the right third of the frame"
+    return "at the far right edge of the frame"
 
-COORDS_LINE = (
-    "The subject positions below are given as x1, y1, x2, y2 coordinates on "
-    "a 0-1000 normalized grid covering the full frame, origin at the top-left "
-    "corner; they describe where each subject physically stands or sits in "
-    "the room.\n\n"
-)
 
-SKELETON_TAIL = (
-    "\n\nAll figures share one lighting setup with the scene, matching shadow "
-    "direction and color temperature, photorealistic skin and fabric detail, "
-    "natural scale against furniture and walls. The guide's rectangles, number "
-    "tags and colors belong only to the guide and physically cannot appear in "
-    "a photograph."
-)
-
-SKELETON_TAIL_COORDS = (
-    "\n\nAll figures share one lighting setup with the scene, matching shadow "
-    "direction and color temperature, photorealistic skin and fabric detail, "
-    "natural scale against furniture and walls. The finished frame is an "
-    "ordinary photograph: only people, room and light, nothing else."
-)
-
-IDENTITY_CLAUSE = (
-    " Keep that subject's exact sex, face, hair, skin tone, clothing and "
-    "proportions identical to how she or he appears in the reference picture."
-)
+def _scale_phrase(y1, y2):
+    """Vertical extent as a body-scale cue (coords 0-1000)."""
+    h = y2 - y1
+    if h >= 450:
+        return "stands full body from the floor to near the ceiling line"
+    if h >= 220:
+        return "stands from the floor to about mid-wall height"
+    return "is placed"
 
 
 def _resolved_regions(boxes, first_ref=2):
-    """Left-to-right region order; subject = box description if typed, else
-    an identity-preserving binding to the matching reference slot
-    (<Picture 2>, <Picture 3>, ...). Never the word 'person' alone."""
+    """Left-to-right order; box i becomes <Picture first_ref+i> /
+    <Subject first_ref+i> with a relational placement hint computed from
+    its normalized bbox. Desc (if typed) is woven by the caller."""
     ordered = sorted(boxes, key=lambda x: x["bbox_px"][0] if x["bbox_px"] else 0)
     out = []
     for i, b in enumerate(ordered):
-        desc = b["desc"].strip()
-        if desc:
-            subject = desc
-        else:
-            subject = ("the exact subject shown in <Picture {}>".format(
-                first_ref + i))
+        ref = first_ref + i
         x1, y1, x2, y2 = b["bbox_norm"]
-        full_height = (y2 - y1) >= 150  # >=15% of frame: head-to-feet is meaningful
-        out.append((b, subject, full_height, bool(desc)))
+        hint = "{} {}".format(_scale_phrase(y1, y2), _band_phrase(x1, x2))
+        if i:
+            hint += ", to the right of <Subject {}>".format(ref - 1)
+        out.append((b, ref, hint))
     return out
 
 
-def build_template_prompt(boxes, roles="", extra="", map_image=True, first_ref=2):
-    lines = []
-    for b, subject, full_height, has_desc in _resolved_regions(boxes, first_ref):
-        cname = color_name(hex_to_rgb(b["hex"]))
-        x1, y1, x2, y2 = b["bbox_norm"]
-        scale = ("The subject of this region occupies it fully: head near the "
-                 "top edge, feet near the bottom edge, body horizontally "
-                 "centered, with a physically consistent shadow beneath it."
-                 if full_height else
-                 "The subject is placed at this spot in the scene.")
-        line = ("Region {}: ".format("{:02d}".format(b["label"]))
-                + ("color {}, ".format(cname) if map_image else "")
-                + "coordinates [{}, {}, {}, {}]. {} Subject and action: {}.{}"
-                .format(x1, y1, x2, y2, scale, subject,
-                        IDENTITY_CLAUSE if not has_desc else ""))
-        lines.append(line)
-    parts = [SKELETON_HEAD]
+def build_template_prompt(boxes, roles="", extra="", first_ref=2):
+    """Deterministic prompt in the official H3 subject grammar: one
+    continuous paragraph, single-scene enforced, no coordinates."""
+    regions = _resolved_regions(boxes, first_ref)
+    parts = ["The interior room in <Picture 1> is <Subject 1>."]
+    for _b, ref, _hint in regions:
+        parts.append("The person in <Picture {0}> is <Subject {0}>.".format(ref))
+    parts.append(
+        "The target image is one single continuous photograph of that room: "
+        "every subject above appears together in the same unbroken frame, "
+        "sharing one camera viewpoint, one continuous floor and wall behind "
+        "all figures, and one lighting setup.")
     if roles.strip():
-        parts.append(roles.strip() + "\n\n")
-    parts.append(MAP_LINE if map_image else COORDS_LINE)
-    parts.append("\n".join(lines))
+        parts.append(roles.strip())
+    parts.append(
+        "<Subject 1> is partially preserved; its walls, floor, window, "
+        "furniture and light remain exactly as shown while the following "
+        "people are present in the room.")
+    for b, ref, hint in regions:
+        desc = b["desc"].strip()
+        who = "<Subject {}>, {},".format(ref, desc) if desc else \
+            "<Subject {}>".format(ref)
+        parts.append("{} {}.".format(who, hint))
+        parts.append(
+            "<Subject {0}> is partially preserved; their face, hair, skin "
+            "tone and outfit remain exactly as in <Picture {0}> while pose, "
+            "position and scale adapt to the room.".format(ref))
     if extra.strip():
-        parts.append("\n\nAdditional brief: " + extra.strip())
-    parts.append(SKELETON_TAIL if map_image else SKELETON_TAIL_COORDS)
-    return "".join(parts)
+        brief = extra.strip()
+        if not brief.endswith((".", "!", "?")):
+            brief += "."
+        parts.append("Additional brief: " + brief)
+    parts.append(
+        "All figures share the room's single light and one consistent "
+        "perspective, with contact shadows falling on the same continuous "
+        "floor. The frame is an ordinary photograph: only the people, the "
+        "room and the light.")
+    return " ".join(parts)
 
 
 def build_llm_request(boxes, roles="", extra="", first_ref=2):
     """User-message payload for the connected Qwen (or for core Generate Text)."""
-    lines = ["Layout job for MiniMax-H3-Image.", ""]
+    lines = ["Layout job for MiniMax-H3-Image.", "",
+             "References, in picture order:",
+             "- <Picture 1>: the environment room (<Subject 1>)."]
+    for b, ref, hint in _resolved_regions(boxes, first_ref):
+        desc = b["desc"].strip()
+        line = ("- <Picture {0}>: a person (<Subject {0}>). "
+                "Placement hint: {1}.".format(ref, hint))
+        if desc:
+            line += " Description to weave verbatim: " + desc
+        lines.append(line)
     if roles.strip():
-        lines += ["Reference picture roles:", roles.strip(), ""]
-    lines.append("Placement regions (left to right). Each region's subject is")
-    lines.append("resolved to a reference picture or user description:")
-    for b, subject, full_height, has_desc in _resolved_regions(boxes, first_ref):
-        cname = color_name(hex_to_rgb(b["hex"]))
-        lines.append(
-            "- region {} color={} coords={} subject={}{}{}".format(
-                "{:02d}".format(b["label"]), cname,
-                ",".join(str(v) for v in b["bbox_norm"]),
-                repr(subject),
-                "" if has_desc else " (describe them from the reference image)",
-                " fill=yes" if b["fill"] else "",
-            ))
+        lines += ["", "Reference picture roles:", roles.strip()]
     if extra.strip():
         lines += ["", "User brief:", extra.strip()]
+    lines += ["",
+              "Write ONE continuous prompt paragraph in the system grammar: "
+              "definitions, a 'The target image' overview, one placement "
+              "sentence plus one partial-preservation sentence per subject, "
+              "then the shared-light closing. Relational scene language "
+              "only - no coordinates, no guide words."]
     return "\n".join(lines)
