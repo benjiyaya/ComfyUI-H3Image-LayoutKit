@@ -48,33 +48,37 @@ Turns the canvas `boxes` JSON into a final prompt for MiniMax-H3-Image.
 | **Inputs** | `boxes` (from the canvas), `extra_brief` (scene/style text), optional `clip` (a CLIP model with text-generation support, e.g. Qwen loaded via *Load CLIP*), `max_length` |
 | **Outputs** | `prompt` (STRING) |
 
-**Deterministic by default — no LLM required.** The prompt follows MiniMax's
-official H3-Image prompt-writing grammar, as one continuous prose paragraph:
+**Deterministic by default — no LLM required.** The prompt is built in the
+grammar this node was tested with:
 
-1. **Source definitions** — `The interior room in <Picture 1> is <Subject 1>.`,
-   `The person in <Picture 2> is <Subject 2>.`, … in picture order.
-2. **Target overview** — `The target image is one single continuous photograph
-   of that room …`
-3. **Per-subject relationships** — one placement sentence plus one
-   `<Subject N> is partially preserved; …` identity sentence per box.
-4. **Shared-light closing** — one perspective, one light, contact shadows on
-   the same floor.
+1. **RAW single-photo head** — declares one clean photograph of ONE continuous
+   environment: one camera viewpoint, one continuous floor and wall behind
+   every figure, one lighting setup.
+2. **Grid explanation** — coordinates are `x1, y1, x2, y2` on a 0–1000
+   normalized grid over this one frame, origin top-left.
+3. **One line per box** — `Region 01: coordinates [389, 26, 599, 566], in the
+   center of the frame. … Subject and action: <description>.` The bbox
+   coordinates are the placement signal that puts each reference character in
+   its drawn region.
+4. **Shared-light tail** — one floor, one light, one perspective; only people,
+   room and light in the frame.
 
-Design choices that keep H3 from misreading the layout:
+Design choices:
 
-- **Single-scene enforcement.** The overview declares one unbroken frame: one
-  camera viewpoint, one continuous floor and wall behind every figure, one
-  lighting setup. This prevents the split-panel / collage renders that
-  per-region phrasing provokes.
-- **Relational positions, never coordinates.** Boxes become scene language —
-  left third / center / right third of the frame, "to the right of
-  `<Subject 2>`", full-body vs. mid-wall scale cues. Raw `[x, y, x, y]`
-  coordinate or "framed by … grid" clauses are never emitted: H3 reads them as
-  separate frames per subject.
-- Box descriptions are woven in verbatim; an empty description auto-binds the
-  region's identity to its reference picture through the partial-preservation
-  sentence (face, hair, skin tone and outfit stay exactly as in
-  `<Picture N>` — never a generic "the person").
+- **Coordinates stay.** Each box's bbox is emitted verbatim as
+  `[x1, y1, x2, y2]` on the 0–1000 grid — that is the whole point of the
+  canvas. MiniMax's general prompt-writing skill does not cover bbox
+  conditioning and must not replace this grammar.
+- **Single-scene enforcement.** The head and tail declare one unbroken frame —
+  one environment, one continuous floor and wall, one viewpoint, one light —
+  so the regions place subjects *inside one photograph* instead of provoking
+  split-panel / collage renders.
+- **Scene language alongside coordinates** — left third / center / right third
+  of the frame, full-body vs. spot-placement scale cues.
+- Box descriptions become subjects verbatim; an empty description auto-binds
+  the region to `the exact subject shown in <Picture i+1>` plus an identity
+  clause (sex, face, hair and clothing stay identical to the reference — never
+  a generic "the person").
 - The output contains **zero** guide vocabulary — words like box, rectangle,
   outline or color names describing placement regions are never emitted.
 
