@@ -84,6 +84,13 @@ canvas preview into `image_1` and the clean scene into `image_4`, set this to
 
 Other design choices:
 
+- **`extra_brief` is scene-level only.** It is emitted with an explicit
+  scoping clause — lighting, mood, background elements — and the prompt
+  declares that per-subject sentences win any contradiction. Put what each
+  subject *does* (kneeling, holding a mic, looking at the window) in that
+  box's description field; an unscoped brief with per-subject verbs
+  ("subject 1 and 2 are performing") overrides the per-region poses and
+  renders stiff standing figures.
 - **Single-scene enforcement.** Head and tail declare one unbroken frame —
   one environment, one continuous floor and wall, one viewpoint, one light —
   so regions place subjects *inside one photograph* instead of provoking

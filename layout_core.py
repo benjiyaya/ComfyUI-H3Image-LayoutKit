@@ -168,7 +168,11 @@ SYSTEM_PROMPT = (
     "5. Never write negative instructions like 'must NOT show the box'; "
     "state positively that only people, environment and light exist in the "
     "frame.\n"
-    "6. Output only the final prompt text, no preamble, no markdown."
+    "6. The user brief adds scene-level context only (lighting, mood, "
+    "background elements); it must never change a subject's pose, position, "
+    "scale or identity given per subject. If the brief seems to contradict "
+    "a subject sentence, the subject sentence wins.\n"
+    "7. Output only the final prompt text, no preamble, no markdown."
 )
 
 SYSTEM_PROMPT_COORDS = (
@@ -205,7 +209,11 @@ SYSTEM_PROMPT_COORDS = (
     "'person'; require one shared lighting setup consistent with the room.\n"
     "6. Never write negative instructions like 'must NOT show the box'; "
     "state positively that only people, room and light exist in the frame.\n"
-    "7. Output only the final prompt text, no preamble, no markdown."
+    "7. The user brief adds scene-level context only (lighting, mood, "
+    "background elements); it must never change a subject's pose, position, "
+    "scale or identity given per subject. If the brief seems to contradict "
+    "a subject sentence, the subject sentence wins.\n"
+    "8. Output only the final prompt text, no preamble, no markdown."
 )
 
 COORDS_LINE = (
@@ -357,7 +365,12 @@ def build_template_prompt(boxes, roles="", extra="", first_ref=2, env_ref=1,
         lines.append(line)
     parts.append("\n".join(lines))
     if extra.strip():
-        parts.append("\n\nAdditional brief: " + extra.strip())
+        # scene-level scoping: an unscoped brief with per-subject verbs
+        # ("subject 1 and 2 are performing") overrode the per-region poses
+        parts.append(
+            "\n\nAdditional brief (scene-level only - lighting, mood, "
+            "background elements; it must not change any subject's pose, "
+            "position, scale or identity stated above): " + extra.strip())
     parts.append(SKELETON_TAIL)
     return "".join(parts)
 
@@ -386,7 +399,10 @@ def build_llm_request(boxes, roles="", extra="", first_ref=2, env_ref=1,
     if roles.strip():
         lines += ["", "Reference picture roles:", roles.strip()]
     if extra.strip():
-        lines += ["", "User brief:", extra.strip()]
+        lines += ["",
+                  "User brief (scene-level only - lighting, mood, background; "
+                  "never overrides the per-subject placement or pose above):",
+                  extra.strip()]
     if coord_mode == "relational":
         lines += ["",
                   "Write ONE continuous prompt paragraph: a RAW single-"
