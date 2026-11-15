@@ -75,10 +75,16 @@ class H3LayoutPrompt:
     one frame, one continuous floor, one light) so H3 places every region
     inside ONE photograph instead of rendering split panels.
 
-    Widgets, stable order: boxes, extra_brief, [clip], [max_length].
+    Widgets, stable order: boxes, extra_brief, [clip], [max_length],
+    [env_picture], [coord_mode].
+    env_picture names the <Picture N> slot holding the clean environment
+    (the base of the whole frame); coord_mode chooses how the bbox reaches
+    the model - relational (proportional scene language, no numbers),
+    both, or coords (legacy raw 0-1000 lines).
     Unwired clip = pure template. Wired clip (e.g. Qwen3.5-9B) = LLM
     rephrasing, guarded: any output mentioning boxes/rectangles/collage/
-    panels or failing to generate falls back to the deterministic template."""
+    panels/axes - or leaking raw grid numbers in relational mode - or
+    failing to generate falls back to the deterministic template."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -103,6 +109,22 @@ class H3LayoutPrompt:
                 }),
                 "max_length": ("INT", {"default": 1024, "min": 64, "max": 8192,
                                        "advanced": True}),
+                "env_picture": ("INT", {"default": 1, "min": 1, "max": 16,
+                                        "tooltip": "Which <Picture N> slot holds "
+                                                   "the CLEAN environment (the base "
+                                                   "scene of the whole frame). "
+                                                   "Usually 1; set e.g. 4 if your "
+                                                   "clean scene is wired to "
+                                                   "image_4 and image_1 carries the "
+                                                   "box-overlay preview."}),
+                "coord_mode": (["relational", "both", "coords"], {
+                    "default": "relational",
+                    "tooltip": "How the bbox reaches the model. relational = "
+                               "proportional scene language only (no numbers - "
+                               "raw 0-1000 numbers get drawn as axis tick labels "
+                               "around one panel per region). coords = legacy raw "
+                               "coordinate lines. both = relational + coordinates.",
+                }),
             },
         }
 
@@ -116,7 +138,8 @@ class H3LayoutPrompt:
                    "Keep the canvas preview OUT of image_1 — use the clean "
                    "room image there.")
 
-    def main(self, boxes, extra_brief="", clip=None, max_length=1024):
+    def main(self, boxes, extra_brief="", clip=None, max_length=1024,
+             env_picture=1, coord_mode="relational"):
         # old workflows saved a 'mode' COMBO value where fields shifted
         if isinstance(extra_brief, str) and extra_brief.strip().lower() in (
                 "template", "qwen"):
@@ -127,13 +150,19 @@ class H3LayoutPrompt:
             logging.warning("H3LayoutPrompt: no valid boxes parsed from input — "
                             "prompt will contain no placement regions. Check the "
                             "canvas 'boxes' wire / editor state.")
-        template = core.build_template_prompt(parsed, "", extra_brief)
+        template = core.build_template_prompt(parsed, "", extra_brief,
+                                              env_ref=env_picture,
+                                              coord_mode=coord_mode)
         if clip is None:
             return (template,)
 
-        request = core.build_llm_request(parsed, "", extra_brief)
+        request = core.build_llm_request(parsed, "", extra_brief,
+                                         env_ref=env_picture,
+                                         coord_mode=coord_mode)
+        system = (core.SYSTEM_PROMPT if coord_mode == "relational"
+                  else core.SYSTEM_PROMPT_COORDS)
         try:
-            tokens = clip.tokenize(request, system_prompt=core.SYSTEM_PROMPT,
+            tokens = clip.tokenize(request, system_prompt=system,
                                    min_length=1, thinking=False)
             generated_ids = clip.generate(
                 tokens, do_sample=False, max_length=max_length,
@@ -155,7 +184,10 @@ class H3LayoutPrompt:
         banned = re.search(
             r"\b(rectangles?|boxes?|outlines?|guides?|maps?|markers?|"
             r"diagrams?|frameworks?|collages?|panels?|diptychs?|triptychs?|"
-            r"split-screens?)\b", text, re.I)
+            r"split-screens?|axes|axis|tick marks?|rulers?)\b", text, re.I)
+        if not banned and coord_mode == "relational" and re.search(
+                r"\b\d{2,4}\b", text):
+            banned = re.search(r"\b\d{2,4}\b", text)  # raw grid numbers leaked
         if banned:
             import logging
             logging.warning("H3LayoutPrompt: LLM output mentioned %r — "

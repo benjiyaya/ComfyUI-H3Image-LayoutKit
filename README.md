@@ -45,36 +45,49 @@ Turns the canvas `boxes` JSON into a final prompt for MiniMax-H3-Image.
 
 | | |
 |---|---|
-| **Inputs** | `boxes` (from the canvas), `extra_brief` (scene/style text), optional `clip` (a CLIP model with text-generation support, e.g. Qwen loaded via *Load CLIP*), `max_length` |
+| **Inputs** | `boxes` (from the canvas), `extra_brief` (scene/style text), optional `clip` (a CLIP model with text-generation support, e.g. Qwen loaded via *Load CLIP*), `max_length`, `env_picture` (which `<Picture N>` is the clean environment, default 1), `coord_mode` (`relational` / `both` / `coords`) |
 | **Outputs** | `prompt` (STRING) |
 
-**Deterministic by default — no LLM required.** The prompt is built in the
-grammar this node was tested with:
+**Deterministic by default — no LLM required.** Every bbox is translated into
+placement language the model follows, wrapped in single-scene enforcement:
 
 1. **RAW single-photo head** — declares one clean photograph of ONE continuous
-   environment: one camera viewpoint, one continuous floor and wall behind
-   every figure, one lighting setup.
-2. **Grid explanation** — coordinates are `x1, y1, x2, y2` on a 0–1000
-   normalized grid over this one frame, origin top-left.
-3. **One line per box** — `Region 01: coordinates [389, 26, 599, 566], in the
-   center of the frame. … Subject and action: <description>.` The bbox
-   coordinates are the placement signal that puts each reference character in
-   its drawn region.
-4. **Shared-light tail** — one floor, one light, one perspective; only people,
-   room and light in the frame.
+   environment, anchored to its reference slot: "the environment shown in
+   `<Picture N>` … remains exactly as in that picture", one camera viewpoint,
+   one continuous floor, one lighting setup, never separate panels.
+2. **One line per box** — `Region 01, in the left third of the frame: stands
+   from the floor to about mid-frame height, occupying a narrow area of the
+   frame width, immediately to the right of the subject of <Picture 2>.
+   Subject and action: <description>.`
+3. **Shared-light tail** — one floor, one light, one perspective; only people,
+   environment and light; no axes, no numbers, no frames.
 
-Design choices:
+### Placement modes (`coord_mode` widget)
 
-- **Coordinates stay.** Each box's bbox is emitted verbatim as
-  `[x1, y1, x2, y2]` on the 0–1000 grid — that is the whole point of the
-  canvas. MiniMax's general prompt-writing skill does not cover bbox
-  conditioning and must not replace this grammar.
-- **Single-scene enforcement.** The head and tail declare one unbroken frame —
+| mode | what reaches the model |
+|---|---|
+| `relational` (default) | proportional scene language only: frame band, width share in words, vertical extent, spacing to the neighbour. **No raw numbers** — test renders showed H3 drawing 0–1000 grid numbers as visible axis tick labels around one panel per region |
+| `both` | relational language + `Coordinates on the 0-1000 grid: [x1, y1, x2, y2]` per region |
+| `coords` | legacy raw-coordinate lines: `Region 01: coordinates [x1, y1, x2, y2], …` |
+
+The bbox canvas remains the placement signal in all modes — `relational`
+translates it instead of deleting it. A/B the modes against your own graph;
+in `relational` mode the LLM guard also falls back to the template if raw
+grid numbers leak into the rewrite.
+
+### Environment slot (`env_picture` widget)
+
+Names which `<Picture N>` slot holds the **clean** environment that becomes
+the base of the whole frame (default 1). If your graph wires the box-overlay
+canvas preview into `image_1` and the clean scene into `image_4`, set this to
+4 so the prompt anchors the environment to the right picture.
+
+Other design choices:
+
+- **Single-scene enforcement.** Head and tail declare one unbroken frame —
   one environment, one continuous floor and wall, one viewpoint, one light —
-  so the regions place subjects *inside one photograph* instead of provoking
+  so regions place subjects *inside one photograph* instead of provoking
   split-panel / collage renders.
-- **Scene language alongside coordinates** — left third / center / right third
-  of the frame, full-body vs. spot-placement scale cues.
 - Box descriptions become subjects verbatim; an empty description auto-binds
   the region to `the exact subject shown in <Picture i+1>` plus an identity
   clause (sex, face, hair and clothing stay identical to the reference — never
@@ -102,8 +115,10 @@ H3 BBox Canvas.boxes ──► H3 Layout Prompt Builder.boxes
 
 Boxes are resolved **left-to-right**, so with empty descriptions the first box
 binds to `<Picture 2>`, the second to `<Picture 3>`, and so on. Keep the box
-order consistent with the `image_N` slot order, and keep `image_1` as the clean
-environment — the canvas `preview` never goes into a conditioning slot.
+order consistent with the `image_N` slot order. If your clean environment sits
+in a slot other than `image_1` (for example `image_4`, because `image_1`
+carries the canvas preview), set `env_picture` to that slot so the prompt
+anchors the base scene to the right `<Picture N>`.
 
 ## Installation
 
