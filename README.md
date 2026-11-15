@@ -1,5 +1,8 @@
 # ComfyUI-H3-Image-LayoutKit
 
+Dev In progress, still optimizing.  Once it's done, a video will be post walkthrough about this.
+
+
 Two ComfyUI nodes for **MiniMax-H3-Image** workflows: draw placement boxes on an
 interactive canvas, and get a clean, model-ready layout prompt out — with
 optional LLM rephrasing that is guarded against guide-word contamination.
@@ -11,6 +14,8 @@ Works on the classic (Nodes 1.0) LiteGraph frontend.
 ### H3 BBox Canvas
 
 An interactive bounding-box editor rendered directly in the node graph.
+
+<img width="799" height="698" alt="Screenshot 2026-11-15 201103" src="https://github.com/user-attachments/assets/fe501714-b02c-4ee6-9ad1-527123933474" />
 
 | | |
 |---|---|
@@ -34,6 +39,9 @@ An interactive bounding-box editor rendered directly in the node graph.
 ### H3 Layout Prompt Builder
 
 Turns the canvas `boxes` JSON into a final prompt for MiniMax-H3-Image.
+
+<img width="1272" height="867" alt="Screenshot 2026-11-15 201226" src="https://github.com/user-attachments/assets/e301fb45-8c8f-49c5-bfc3-e5e216990ec6" />
+
 
 | | |
 |---|---|
